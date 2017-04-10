@@ -64,13 +64,13 @@ inline double clamp(double val, double min_val, double max_val)
 }
 inline VectorXd CTRV_postprocess(const VectorXd& x)
 {
-  auto max_yawrate = 75*M_PI/180; // rad/s, bound yawrate to a reasonable number
+  auto max_yawrate = 60*M_PI/180; // rad/s, bound yawrate to a reasonable number
 
   VectorXd x_out = x;
 
+  x_out(2) = clamp(x(2), -25, 25);
   x_out(3) = angle_normalize(x(3));  // Normalize angle to between -pi and +pi
   x_out(4) = clamp(x(4), -max_yawrate, max_yawrate);
-//  x_out(4) = std::max(-max_yawrate, std::min(x(4), +max_yawrate));
   return x_out;
 }
 inline MatrixXd LidarMeasurement(const VectorXd& x){
@@ -78,7 +78,7 @@ inline MatrixXd LidarMeasurement(const VectorXd& x){
   z << x(0), x(1);
   return z;
 }
-inline VectorXd Lidar_postprocess(const VectorXd& z)
+inline VectorXd LidarPostprocess(const VectorXd &z)
 {
   return z;
 }
@@ -107,7 +107,7 @@ inline VectorXd RadarMeasurement(const VectorXd& x)
 
   return z;
 }
-inline VectorXd Radar_postprocess(const VectorXd& z)
+inline VectorXd RadarPostprocess(const VectorXd &z)
 {
   VectorXd z_out = z;
   z_out(1) = angle_normalize(z(1));
@@ -136,7 +136,7 @@ UKF::UKF() {
   std_a_ = 3.0;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = 0.6;
+  std_yawdd_ = 0.55;
 
   // Laser measurement noise standard deviation position1 in m
   std_laspx_ = 0.15;
@@ -201,12 +201,10 @@ void UKF::InitializeFromMeasurement(MeasurementPackage meas_package)
  * either radar or laser.
  */
 void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
-
+  // If measurements are too tiny, make them slightly bigger
   if(meas_package.raw_measurements_.squaredNorm() < 0.00001)
   {
-    x_.fill(0.001);
-    return;
-//    meas_package.raw_measurements_.fill(0.01);
+    meas_package.raw_measurements_.fill(0.01);
   }
   if(!is_initialized_)
   {
@@ -333,7 +331,7 @@ inline double UKF::UpdateUKF(int n_z, const VectorXd& z, const VectorXd& z_pred,
     // state difference
     VectorXd x_diff = CTRV_postprocess(Xsig_pred_.col(i) - Xsig_pred_.col(0));
 
-    VectorXd z_diff = Radar_postprocess(Zsig.col(i) - z_pred);
+    VectorXd z_diff = RadarPostprocess(Zsig.col(i) - z_pred);
 
     Tc = Tc + weights_(i) * x_diff * z_diff.transpose() ;
   }
@@ -341,7 +339,7 @@ inline double UKF::UpdateUKF(int n_z, const VectorXd& z, const VectorXd& z_pred,
   MatrixXd K = Tc * S.inverse();
 
   //residual
-  VectorXd z_diff = Radar_postprocess(z - z_pred);
+  VectorXd z_diff = RadarPostprocess(z - z_pred);
 
   //update state mean and covariance matrix
   x_ = x_ + K * z_diff;
@@ -374,7 +372,7 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
   S.fill(0.0);
   for (int i = 0; i < 2 * n_aug_ + 1; i++) {  //2n+1 simga points
     //residual
-    VectorXd z_diff = Lidar_postprocess(Zsig.col(i) - z_pred);
+    VectorXd z_diff = LidarPostprocess(Zsig.col(i) - z_pred);
 
     S = S + weights_(i) * z_diff * z_diff.transpose();
   }
@@ -418,7 +416,7 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   S.fill(0.0);
   for (int i = 0; i < 2 * n_aug_ + 1; i++) {  //2n+1 simga points
     //residual
-    VectorXd z_diff = Radar_postprocess(Zsig.col(i) - z_pred);
+    VectorXd z_diff = RadarPostprocess(Zsig.col(i) - z_pred);
 
     S = S + weights_(i) * z_diff * z_diff.transpose();
   }

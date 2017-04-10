@@ -74,6 +74,8 @@ public:
   ///* the current NIS for laser
   double NIS_laser_;
 
+  // Last measurement
+  MeasurementPackage last_measurement_;
   /**
    * Constructor
    */
@@ -84,6 +86,7 @@ public:
    */
   virtual ~UKF();
 
+  void InitializeFromMeasurement(MeasurementPackage meas_package);
   /**
    * ProcessMeasurement
    * @param meas_package The latest measurement data of either radar or laser
@@ -110,7 +113,7 @@ public:
   void UpdateRadar(MeasurementPackage meas_package);
 private:
   inline MatrixXd GenerateAugmentedSigmaPoints();
-  inline MatrixXd PredictSigmaPoints(double delta_t, const MatrixXd& Xsig_aug);
+//  inline MatrixXd PredictSigmaPoints(double delta_t, const MatrixXd& Xsig_aug);
 
   inline MatrixXd PredictRadarMeasurement(int n_z);
   inline MatrixXd PredictLidarMeasurement(int n_z);

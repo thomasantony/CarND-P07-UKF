@@ -1,5 +1,22 @@
-# Unscented Kalman Filter Project Starter Code
+# Unscented Kalman Filter Project
 Self-Driving Car Engineer Nanodegree Program
+
+---
+
+## Architecture
+The original code has been refactored to be in the form of a modular library. All the "problem-specific" information, such as the dynamic 
+model, the sensor models etc. have been made configurable parts of the UKF class that are passed in to the constructor. 
+This can been seen in the first 200 lines of main.cpp. There is no problem-specific information anywhere else in the repository.
+
+The UKF class can utilize any number of sensor models for filtering as long as they are passed in to it during instantiation. 
+The dynamic model is also no longer restricted to just CTRV. There is also an option to specify a post processing function for 
+both sensor measurements as well as states. This is useful for normalizing angles,putting bounds on values etc.
+
+
+## *Notes/Caveats*
+ 
+In order to make the filter numerically stable, the maximum turn-rate is bounded to 60 degrees/s and the filter is reset if the
+covariance matrix becomes non-positive semi definite at any point.
 
 ---
 
@@ -17,15 +34,6 @@ Self-Driving Car Engineer Nanodegree Program
 4. Run it: `./UnscentedKF path/to/input.txt path/to/output.txt`. You can find
    some sample inputs in 'data/'.
     - eg. `./UnscentedKF ../data/sample-laser-radar-measurement-data-1.txt output.txt`
-
-## Editor Settings
-
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
-
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
 
 ## Code Style
 

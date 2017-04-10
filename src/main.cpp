@@ -15,7 +15,7 @@ using Eigen::MatrixXd;
 using Eigen::VectorXd;
 using std::vector;
 
-namespace{
+namespace{  /* Problem-specific definitions begin here. */
   /**********************************************/
   /* Dynamic Model                              */
   /**********************************************/
@@ -76,7 +76,7 @@ namespace{
 
     VectorXd x_out = x;
 
-    x_out(2) = clamp(x(2), -25, 25);
+    x_out(2) = clamp(x(2), -25.0, 25.0);
     x_out(3) = angle_normalize(x(3));  // Normalize angle to between -pi and +pi
     x_out(4) = clamp(x(4), -max_yawrate, max_yawrate);
     return x_out;
@@ -396,7 +396,7 @@ int main(int argc, char* argv[]) {
   }
 
   // compute the accuracy (RMSE)
-  cout << "Accuracy - RMSE:" << endl << Tools::CalculateRMSE(estimations, ground_truth) << endl;
+  cout << "Accuracy - RMSE:" << endl << CalculateRMSE(estimations, ground_truth) << endl;
 
   // close files
   if (out_file_.is_open()) {

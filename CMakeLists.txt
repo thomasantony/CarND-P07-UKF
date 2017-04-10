@@ -8,7 +8,7 @@ add_definitions(-stdlib=libc++)
 set(sources
    src/ukf.cpp
    src/main.cpp
-   src/tools.cpp)
+        )
 
 
 add_executable(UnscentedKF ${sources})

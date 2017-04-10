@@ -44,7 +44,6 @@ UKF::~UKF() {}
 
 void UKF::AddSensor(SensorType type, const SensorModel &sensor) {
   sensors_[type] = sensor;
-  NIS_[type] = 0.0;
 }
 
 

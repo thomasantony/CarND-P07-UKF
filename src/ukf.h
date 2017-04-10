@@ -87,8 +87,11 @@ public:
   MeasurementPackage last_measurement_;
   /**
    * Constructor
+   * @param model Dynamic model for propagating states
+   * @param sensors Sensor map defining sensor types and models
+   * @param initializer Function used to initialize the filter state and covariance
    */
-  UKF(const DynamicModel& model, const Initializer& initializer);
+  UKF(const DynamicModel& model, const SensorMap& sensors, const Initializer& initializer);
 
   /**
    * Destructor
@@ -125,10 +128,16 @@ private:
   /**
   * Initializes the UKF from a single measurement by calling pre-defined initializer
   *
-  * @param meas_package
+  * @param first_measurement Measurement to use for initialization
+  * @returns bool to indicate if initialization succeeded or failed
   */
-  bool InitializeFilter(MeasurementPackage meas_package);
+  bool InitializeFilter(MeasurementPackage first_measurement);
 
+  /**
+   * Generates the augmented points required for the unscented transform.
+   *
+   * @return Xsig_aug - Matrix where each column is one of the sampled state vectors.
+   */
   inline MatrixXd GenerateAugmentedSigmaPoints();
 
 };

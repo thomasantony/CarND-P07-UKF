@@ -16,6 +16,10 @@ using Eigen::VectorXd;
 using std::vector;
 
 namespace{
+  /**********************************************/
+  /* Dynamic Model                              */
+  /**********************************************/
+
   /* Function that propagates the state based on the CTRV model */
   VectorXd CTRV_ModelFunc(double delta_t, const VectorXd &x)
   {
@@ -79,9 +83,9 @@ namespace{
   }
   const auto CTRV_model = DynamicModel(CTRV_ModelFunc, Process_Noise, CTRV_Postprocessor);
 
-  /***************************************************************************/
-  /*                            Sensor Models                                */
-  /***************************************************************************/
+  /**********************************************/
+  /* Sensor Models                              */
+  /**********************************************/
 
   /**********************/
   /* Lidar Sensor model */
@@ -101,7 +105,7 @@ namespace{
                                                   0, std_laspy*std_laspy).finished();
   inline VectorXd Lidar_Postprocessor(const VectorXd &z)
   {
-    return z; // No post-processing
+    return z; // No post-processing required
   }
   const auto Lidar_Sensor = SensorModel(Lidar_Measurement, Lidar_Noise, Lidar_Postprocessor);
 
@@ -139,8 +143,8 @@ namespace{
   // Radar measurement noise standard deviation radius change in m/s
   const auto std_radrd = 0.3;
   const MatrixXd Radar_Noise = (MatrixXd(3,3) << std_radr*std_radr, 0, 0,
-                                                0, std_radphi*std_radphi, 0,
-                                                0, 0,std_radrd*std_radrd).finished();
+                                                 0, std_radphi*std_radphi, 0,
+                                                 0, 0,std_radrd*std_radrd).finished();
 
   inline VectorXd Radar_Postprocessor(const VectorXd &z)
   {
@@ -150,7 +154,17 @@ namespace{
   }
   const auto Radar_Sensor = SensorModel(Radar_Measurement, Radar_Noise, Radar_Postprocessor);
 
-  /* UKF Initializer */
+
+  /**********************/
+  /* Sensor mapping     */
+  /**********************/
+  const SensorMap sensors = {{SensorType::LASER, Lidar_Sensor},
+                             {SensorType::RADAR, Radar_Sensor}};
+
+
+  /**********************/
+  /* UKF Initializer    */
+  /**********************/
   bool InitUKF(MeasurementPackage first_measurement, VectorXd& x_in, MatrixXd& P_in)
   {
     // initial state
@@ -181,7 +195,17 @@ namespace{
     return true;
   }
 
+  /**********************/
+  /* UKF Instance       */
+  /**********************/  // Create a UKF instance and pass in the dynamic model, sensors and initializer
+  UKF ukf(CTRV_model, sensors, InitUKF);
 }
+
+
+/**********************************************/
+/* Main Program                               */
+/**********************************************/
+
 void check_arguments(int argc, char* argv[]) {
   string usage_instructions = "Usage instructions: ";
   usage_instructions += argv[0];
@@ -296,13 +320,6 @@ int main(int argc, char* argv[]) {
       gt_package.gt_values_ << x_gt, y_gt, vx_gt, vy_gt;
       gt_pack_list.push_back(gt_package);
   }
-
-  // Create a UKF instance and pass in the dynamic model and initializer
-  UKF ukf(CTRV_model, InitUKF);
-
-  // Add sensor models
-  ukf.AddSensor(SensorType::LASER, Lidar_Sensor);
-  ukf.AddSensor(SensorType::RADAR, Radar_Sensor);
 
   // used to compute the RMSE later
   vector<VectorXd> estimations;

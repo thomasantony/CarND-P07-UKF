@@ -16,11 +16,14 @@ using std::endl;
 /**
  * Initializes Unscented Kalman filter
  */
-UKF::UKF(const DynamicModel& model, const Initializer& initializer) {
+UKF::UKF(const DynamicModel& model, const SensorMap &sensors, const Initializer& initializer) {
+
+  initializer_fn_ = initializer;
+  sensors_ = sensors;
 
   // Store the dynamic model
   std::tie(statePredictor_, Q_, statePostProcessor_) = model;
-  initializer_fn_ = initializer;
+
 
   n_x_ = 5;
   n_aug_ = n_x_ + 2;
@@ -43,6 +46,8 @@ void UKF::AddSensor(SensorType type, const SensorModel &sensor) {
   sensors_[type] = sensor;
   NIS_[type] = 0.0;
 }
+
+
 bool UKF::InitializeFilter(MeasurementPackage meas_package)
 {
   is_initialized_ = initializer_fn_(meas_package, x_, P_);
@@ -115,16 +120,13 @@ MatrixXd UKF::GenerateAugmentedSigmaPoints(){
   //create sigma point matrix
   MatrixXd Xsig_aug = MatrixXd(n_aug_, 2 * n_aug_ + 1);
 
-  x_aug_.head(5) = x_;
+  x_aug_.head(n_x_) = x_;
   x_aug_.tail(n_aug_-n_x_).fill(0.0);
 
   //create augmented covariance matrix
   P_aug_.fill(0.0);
-  P_aug_.topLeftCorner(5,5) = P_;
+  P_aug_.topLeftCorner(n_x_, n_x_) = P_;
   P_aug_.bottomRightCorner(n_aug_-n_x_, n_aug_-n_x_) = Q_;
-
-//  P_aug_(5,5) = std_a*std_a_;
-//  P_aug_(6,6) = std_yawdd_*std_yawdd_;
 
   // Numerical stability fix by Olli Vertanen
   // Source: https://discussions.udacity.com/t/numerical-instability-of-the-implementation/230449/2?u=tantony
@@ -237,7 +239,7 @@ inline void UKF::UpdateUKF(MeasurementPackage meas_package){
   x_ = x_ + K * z_diff;
   P_ = P_ - K*S*K.transpose();
 
+  // Save NIS
   NIS_[meas_package.sensor_type_] = z_diff.transpose() * S.inverse() * z_diff;
-//  cout << "NIS "<<meas_package.sensor_type_<<" = "<<NIS_[meas_package.sensor_type_]<<endl;
 }
 

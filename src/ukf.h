@@ -1,27 +1,51 @@
 #ifndef UKF_H
 #define UKF_H
 
-#include "measurement_package.h"
+#include <unordered_map>
 #include "Eigen/Dense"
-#include <vector>
-#include <string>
-#include <fstream>
+
+enum SensorType {
+  LASER,
+  RADAR
+};
+
+#include "measurement_package.h"
 #include "tools.h"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 
+using ProcessNoise = MatrixXd;
+using DynamicModelFunc = std::function<VectorXd(double, const VectorXd&)>;
+using PostProcessor = std::function<VectorXd(const VectorXd&)>;
+// Dynamic model includes number of states, dynamic model function,
+// process noise matrix and post processor function.
+using DynamicModel = std::tuple<DynamicModelFunc, ProcessNoise, PostProcessor>;
+
+using SensorNoise = MatrixXd;
+using SensorFunc = std::function<VectorXd (const VectorXd &x)>;
+using SensorModel = std::tuple<SensorFunc, SensorNoise, PostProcessor>;
+
+using SensorMap = std::unordered_map<SensorType, SensorModel>;
+
+using Initializer = std::function<bool(MeasurementPackage, VectorXd&, MatrixXd&)>;
 class UKF {
 public:
 
   ///* initially set to false, set to true in first call of ProcessMeasurement
   bool is_initialized_;
 
-  ///* if this is false, laser measurements will be ignored (except for init)
-  bool use_laser_;
+  ///* dynamic model used for state propagation
+  DynamicModelFunc statePredictor_;
 
-  ///* if this is false, radar measurements will be ignored (except for init)
-  bool use_radar_;
+  ///* post processor called after any state operation
+  PostProcessor statePostProcessor_;
+
+  ///* initializer function for boot-strapping the filter
+  Initializer initializer_fn_;
+
+  //* Map of sensor types and sensors to be used by the filter
+  SensorMap sensors_;
 
   ///* state vector: [pos1 pos2 vel_abs yaw_angle yaw_rate] in SI units and rad
   VectorXd x_;
@@ -29,32 +53,20 @@ public:
   ///* state covariance matrix
   MatrixXd P_;
 
-  ///* predicted sigma points matrix
-  MatrixXd Xsig_pred_;
+  ///* process noise covariance matrix
+  MatrixXd Q_;
 
   ///* time when the state is true, in us
   long long time_us_;
 
-  ///* Process noise standard deviation longitudinal acceleration in m/s^2
-  double std_a_;
+  ///* augmented state vector
+  VectorXd x_aug_;
 
-  ///* Process noise standard deviation yaw acceleration in rad/s^2
-  double std_yawdd_;
+  ///* augmented covariance matrix
+  MatrixXd P_aug_;
 
-  ///* Laser measurement noise standard deviation position1 in m
-  double std_laspx_;
-
-  ///* Laser measurement noise standard deviation position2 in m
-  double std_laspy_;
-
-  ///* Radar measurement noise standard deviation radius in m
-  double std_radr_;
-
-  ///* Radar measurement noise standard deviation angle in rad
-  double std_radphi_;
-
-  ///* Radar measurement noise standard deviation radius change in m/s
-  double std_radrd_ ;
+  ///* predicted sigma points matrix
+  MatrixXd Xsig_pred_;
 
   ///* Weights of sigma points
   VectorXd weights_;
@@ -68,25 +80,29 @@ public:
   ///* Sigma point spreading parameter
   double lambda_;
 
-  ///* the current NIS for radar
-  double NIS_radar_;
-
-  ///* the current NIS for laser
-  double NIS_laser_;
+  ///* the current NIS for all sensors
+  std::unordered_map<SensorType, double> NIS_;
 
   // Last measurement
   MeasurementPackage last_measurement_;
   /**
    * Constructor
    */
-  UKF();
+  UKF(const DynamicModel& model, const Initializer& initializer);
 
   /**
    * Destructor
    */
   virtual ~UKF();
 
-  void InitializeFromMeasurement(MeasurementPackage meas_package);
+  /**
+   * Adds a new sensor model to the UKF
+   *
+   * @param type Type of sensor
+   * @param sensor Sensor model definition
+   */
+  void AddSensor(SensorType type, const SensorModel& sensor);
+
   /**
    * ProcessMeasurement
    * @param meas_package The latest measurement data of either radar or laser
@@ -101,23 +117,20 @@ public:
   void Prediction(double delta_t);
 
   /**
-   * Updates the state and the state covariance matrix using a laser measurement
+   * Updates the state and the state covariance matrix using sensor models
    * @param meas_package The measurement at k+1
    */
-  void UpdateLidar(MeasurementPackage meas_package);
-
-  /**
-   * Updates the state and the state covariance matrix using a radar measurement
-   * @param meas_package The measurement at k+1
-   */
-  void UpdateRadar(MeasurementPackage meas_package);
+  void UpdateUKF(MeasurementPackage meas_package);
 private:
-  inline MatrixXd GenerateAugmentedSigmaPoints();
-//  inline MatrixXd PredictSigmaPoints(double delta_t, const MatrixXd& Xsig_aug);
+  /**
+  * Initializes the UKF from a single measurement by calling pre-defined initializer
+  *
+  * @param meas_package
+  */
+  bool InitializeFilter(MeasurementPackage meas_package);
 
-  inline MatrixXd PredictRadarMeasurement(int n_z);
-  inline MatrixXd PredictLidarMeasurement(int n_z);
-  inline double UpdateUKF(int n_z, const VectorXd& z, const VectorXd& z_pred, const MatrixXd& Zsig, const MatrixXd& S);
+  inline MatrixXd GenerateAugmentedSigmaPoints();
+
 };
 
 #endif /* UKF_H */

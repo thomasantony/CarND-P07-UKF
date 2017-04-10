@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include "Eigen/Dense"
 #include "ukf.h"
+#include "tools.h"
 #include "ground_truth_package.h"
 #include "measurement_package.h"
 
@@ -14,6 +15,173 @@ using Eigen::MatrixXd;
 using Eigen::VectorXd;
 using std::vector;
 
+namespace{
+  /* Function that propagates the state based on the CTRV model */
+  VectorXd CTRV_ModelFunc(double delta_t, const VectorXd &x)
+  {
+    VectorXd x_pred(5);
+    //extract values for better readability
+    double p_x = x(0);
+    double p_y = x(1);
+    double v = x(2);
+    double yaw = x(3);
+    double yawd = x(4);
+    double nu_a = x(5);
+    double nu_yawdd = x(6);
+
+    //predicted state values
+    double px_p, py_p;
+
+    //avoid division by zero
+    if (std::fabs(yawd) > 0.01) {
+      px_p = p_x + v/yawd * ( sin (yaw + yawd*delta_t) - sin(yaw));
+      py_p = p_y + v/yawd * ( cos(yaw) - cos(yaw+yawd*delta_t) );
+    }
+    else {
+      px_p = p_x + v*delta_t*cos(yaw);
+      py_p = p_y + v*delta_t*sin(yaw);
+    }
+
+    double v_p = v;
+    double yaw_p = yaw + yawd*delta_t;
+    double yawd_p = yawd;
+
+    //add noise
+    px_p = px_p + 0.5*nu_a*delta_t*delta_t * cos(yaw);
+    py_p = py_p + 0.5*nu_a*delta_t*delta_t * sin(yaw);
+    v_p = v_p + nu_a*delta_t;
+
+    yaw_p = yaw_p + 0.5*nu_yawdd*delta_t*delta_t;
+    yawd_p = yawd_p + nu_yawdd*delta_t;
+
+    //write predicted sigma point into right column
+    x_pred << px_p, py_p, v_p, yaw_p, yawd_p;
+    return x_pred;
+  }
+  // Process noise standard deviation longitudinal acceleration in m/s^2
+  const auto std_a = 3.0;
+
+  // Process noise standard deviation yaw acceleration in rad/s^2
+  const auto std_yawdd = 0.55;
+
+  const MatrixXd Process_Noise = (MatrixXd(2,2) << std_a*std_a, 0,
+                                           0, std_yawdd*std_yawdd).finished();
+  inline VectorXd CTRV_Postprocessor(const VectorXd& x)
+  {
+    auto max_yawrate = 60*M_PI/180; // rad/s, bound yawrate to a reasonable number
+
+    VectorXd x_out = x;
+
+    x_out(2) = clamp(x(2), -25, 25);
+    x_out(3) = angle_normalize(x(3));  // Normalize angle to between -pi and +pi
+    x_out(4) = clamp(x(4), -max_yawrate, max_yawrate);
+    return x_out;
+  }
+  const auto CTRV_model = DynamicModel(CTRV_ModelFunc, Process_Noise, CTRV_Postprocessor);
+
+  /***************************************************************************/
+  /*                            Sensor Models                                */
+  /***************************************************************************/
+
+  /**********************/
+  /* Lidar Sensor model */
+  /**********************/
+  inline MatrixXd Lidar_Measurement(const VectorXd& x){
+    VectorXd z(2);
+    z << x(0), x(1);
+    return z;
+  }
+  // Laser measurement noise standard deviation position1 in m
+  const auto std_laspx = 0.15;
+
+  // Laser measurement noise standard deviation position2 in m
+  const auto std_laspy = 0.15;
+
+  const MatrixXd Lidar_Noise = (MatrixXd(2,2) << std_laspx*std_laspx, 0,
+                                                  0, std_laspy*std_laspy).finished();
+  inline VectorXd Lidar_Postprocessor(const VectorXd &z)
+  {
+    return z; // No post-processing
+  }
+  const auto Lidar_Sensor = SensorModel(Lidar_Measurement, Lidar_Noise, Lidar_Postprocessor);
+
+  /**********************/
+  /* Radar Sensor model */
+  /**********************/
+  inline VectorXd Radar_Measurement(const VectorXd& x)
+  {
+    VectorXd z(3);
+    // extract values for better readability
+    double p_x = x(0);
+    double p_y = x(1);
+    double v   = x(2);
+    double yaw = x(3);
+
+    double v1 = cos(yaw)*v;
+    double v2 = sin(yaw)*v;
+
+    double rho = sqrt(p_x*p_x + p_y*p_y);
+    if(rho < 0.01)
+    {
+      rho = 0.01;
+    }
+    // measurement model
+    z(0) = rho;                        //r
+    z(1) = atan2(p_y,p_x);             //phi
+    z(2) = (p_x*v1 + p_y*v2 ) / rho;   //r_dot
+
+    return z;
+  }
+  // Radar measurement noise standard deviation radius in m
+  const auto std_radr = 0.3;
+  // Radar measurement noise standard deviation angle in rad
+  const auto std_radphi = 0.03;
+  // Radar measurement noise standard deviation radius change in m/s
+  const auto std_radrd = 0.3;
+  const MatrixXd Radar_Noise = (MatrixXd(3,3) << std_radr*std_radr, 0, 0,
+                                                0, std_radphi*std_radphi, 0,
+                                                0, 0,std_radrd*std_radrd).finished();
+
+  inline VectorXd Radar_Postprocessor(const VectorXd &z)
+  {
+    VectorXd z_out = z;
+    z_out(1) = angle_normalize(z(1));
+    return z_out;
+  }
+  const auto Radar_Sensor = SensorModel(Radar_Measurement, Radar_Noise, Radar_Postprocessor);
+
+  /* UKF Initializer */
+  bool InitUKF(MeasurementPackage first_measurement, VectorXd& x_in, MatrixXd& P_in)
+  {
+    // initial state
+    x_in = VectorXd(5);
+
+    // initial covariance matrix
+    P_in = MatrixXd(5,5);
+    double p_x, p_y, rho, rhodot, phi; //, v, yaw, yawd;
+    if(first_measurement.sensor_type_ == SensorType::LASER)
+    {
+      p_x = first_measurement.raw_measurements_[0];
+      p_y = first_measurement.raw_measurements_[1];
+      rho = sqrt(p_x*p_x + p_y*p_y);
+      x_in << p_x, p_y, 0, 0, 0;
+    } else if(first_measurement.sensor_type_ == SensorType::RADAR)
+    {
+      rho = first_measurement.raw_measurements_[0];
+      phi = first_measurement.raw_measurements_[1];
+      rhodot = first_measurement.raw_measurements_[2];
+      x_in << rho*cos(phi), rho*sin(phi), rhodot, 0, 0;
+    }
+    P_in << 1, 0, 0, 0, 0,
+        0, 1, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, 1, 0,
+        0, 0, 0, 0, 1;
+
+    return true;
+  }
+
+}
 void check_arguments(int argc, char* argv[]) {
   string usage_instructions = "Usage instructions: ";
   usage_instructions += argv[0];
@@ -87,7 +255,7 @@ int main(int argc, char* argv[]) {
       // laser measurement
 
       // read measurements at this timestamp
-      meas_package.sensor_type_ = MeasurementPackage::LASER;
+      meas_package.sensor_type_ = SensorType::LASER;
       meas_package.raw_measurements_ = VectorXd(2);
       float px;
       float py;
@@ -101,7 +269,7 @@ int main(int argc, char* argv[]) {
       // radar measurement
 
       // read measurements at this timestamp
-      meas_package.sensor_type_ = MeasurementPackage::RADAR;
+      meas_package.sensor_type_ = SensorType::RADAR;
       meas_package.raw_measurements_ = VectorXd(3);
       float ro;
       float phi;
@@ -129,8 +297,12 @@ int main(int argc, char* argv[]) {
       gt_pack_list.push_back(gt_package);
   }
 
-  // Create a UKF instance
-  UKF ukf;
+  // Create a UKF instance and pass in the dynamic model and initializer
+  UKF ukf(CTRV_model, InitUKF);
+
+  // Add sensor models
+  ukf.AddSensor(SensorType::LASER, Lidar_Sensor);
+  ukf.AddSensor(SensorType::RADAR, Radar_Sensor);
 
   // used to compute the RMSE later
   vector<VectorXd> estimations;
@@ -166,7 +338,7 @@ int main(int argc, char* argv[]) {
     out_file_ << ukf.x_(4) << "\t"; // yaw_rate -est
 
     // output the measurements
-    if (measurement_pack_list[k].sensor_type_ == MeasurementPackage::LASER) {
+    if (measurement_pack_list[k].sensor_type_ == SensorType::LASER) {
       // output the estimation
 
       // p1 - meas
@@ -174,7 +346,7 @@ int main(int argc, char* argv[]) {
 
       // p2 - meas
       out_file_ << measurement_pack_list[k].raw_measurements_(1) << "\t";
-    } else if (measurement_pack_list[k].sensor_type_ == MeasurementPackage::RADAR) {
+    } else if (measurement_pack_list[k].sensor_type_ == SensorType::RADAR) {
       // output the estimation in the cartesian coordinates
       float ro = measurement_pack_list[k].raw_measurements_(0);
       float phi = measurement_pack_list[k].raw_measurements_(1);
@@ -189,13 +361,7 @@ int main(int argc, char* argv[]) {
     out_file_ << gt_pack_list[k].gt_values_(3) << "\t";
 
     // output the NIS values
-    
-    if (measurement_pack_list[k].sensor_type_ == MeasurementPackage::LASER) {
-      out_file_ << ukf.NIS_laser_ << "\n";
-    } else if (measurement_pack_list[k].sensor_type_ == MeasurementPackage::RADAR) {
-      out_file_ << ukf.NIS_radar_ << "\n";
-    }
-
+    out_file_ << ukf.NIS_[measurement_pack_list[k].sensor_type_] << "\n";
 
     // convert ukf x vector to cartesian to compare to ground truth
     VectorXd ukf_x_cartesian_ = VectorXd(4);
